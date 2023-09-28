@@ -44,10 +44,8 @@ class StreamLine(Location_list):
             step_index = 0
             for i in range(streamline_len + 1):
                 streamline_step_total_dist = interval_start + i * streamline_step_dist
-                while step_index < len(trajectory) and distances[step_index] < streamline_step_total_dist:
+                while step_index < len(trajectory) and round(distances[step_index], 4) < round(streamline_step_total_dist,4):
                     step_index += 1
-                    if step_index == len(trajectory):
-                        break
                 if step_index == len(trajectory):
                     self.append(None)
                 else:
@@ -72,10 +70,8 @@ class StreamLine(Location_list):
             step_index = 0
             for i in range(streamline_len + 1):
                 streamline_step_total_time = interval_start + i * streamline_step_time
-                while step_index < len(trajectory) and trajectory[step_index].time_stamp < streamline_step_total_time:
+                while step_index < len(trajectory) and round(trajectory[step_index].time_stamp, 4) < round(streamline_step_total_time, 4):
                     step_index += 1
-                    if step_index == len(trajectory):
-                        break
                 if step_index == len(trajectory):
                     self.append(None)
                 else:
