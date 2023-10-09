@@ -1,4 +1,4 @@
-from json_cpp import JsonObject, JsonList, JsonString
+from json_cpp import JsonObject, JsonList, JsonString, SearchType, SortOrder, NotFoundBehavior
 from .util import *
 from .coordinates import *
 from .location import *
@@ -6,7 +6,6 @@ from .shape import Space
 from .world import World_implementation, World
 from .cell import Cell_group_builder
 from datetime import datetime
-from bisect import bisect_left, bisect_right
 
 
 class Step(JsonObject):
@@ -71,7 +70,6 @@ class Velocities(JsonList):
             filtered.append(sum(self[b:e])/(e-b))
         return filtered
 
-
 class Trajectories(JsonList):
     def __init__(self, iterable=None):
         JsonList.__init__(self, iterable=iterable, list_type=Step)
@@ -84,36 +82,22 @@ class Trajectories(JsonList):
             first_frame = i
         del self[0:first_frame-1]
 
-    class SearchType:
-        Left = -1
-        Exact = 0
-        Right = 1
+    def get_step_index_by_time_stamp(self, time_stamp: float, search_type: int = SearchType.Aprox) -> int:
+        return self.find_ordered_index(time_stamp, search_type=search_type, key=lambda s: s.time_stamp)
 
-    def get_step_index_by_time_stamp(self, time_stamp: float, search_type: int = SearchType.Exact) -> int:
-        if search_type == Trajectories.SearchType.Left:
-            i = bisect_left(self, time_stamp, key=lambda s: s.time_stamp)
-        else:
-            i = bisect_right(self, time_stamp, key=lambda s: s.time_stamp)
-        if search_type == Trajectories.SearchType.Exact and (i >= len(self) or self[i].time_stamp != time_stamp):
-            raise RuntimeError("Time_stamp %f not found", time_stamp)
-        return i
-
-    def get_step_by_time_stamp(self, time_stamp: float, search_type: int = SearchType.Exact) -> Step:
-        step_index = self.get_step_index_by_time_stamp(time_stamp, search_type)
-        return self[step_index]
+    def get_step_by_time_stamp(self, time_stamp: float, search_type: int = SearchType.Aprox) -> Step:
+        try:
+            step_index = self.get_step_index_by_time_stamp(time_stamp, search_type)
+            return self[step_index]
+        except:
+            return None
 
     def get_step_index_by_frame(self, frame: int, search_type: int = SearchType.Exact) -> int:
-        if search_type == Trajectories.SearchType.Left:
-            i = bisect_left(self, frame, key=lambda s: s.frame)
-        else:
-            i = bisect_right(self, frame, key=lambda s: s.frame)
-        if search_type == Trajectories.SearchType.Exact and (i >= len(self) or self[i].frame != frame):
-            raise RuntimeError("Frame %i not found", frame)
-        return i
+        return self.find_ordered_index(frame, search_type=search_type, key=lambda s: s.frame)
 
     def get_step_by_frame(self, frame: int, search_type: int = SearchType.Exact) -> Step:
         try:
-            step_index = self.get_step_index_by_frame(frame, search_type)
+            step_index = self.get_step_index_by_frame(frame, search_type=search_type)
             return self[step_index]
         except:
             return None
@@ -123,14 +107,23 @@ class Trajectories(JsonList):
         s = 0
         e = len(self) - 1
         if start_time is not None:
-            s = self.get_step_index_by_time_stamp(start_time, search_type=Trajectories.SearchType.Right)
+            s = self.get_step_index_by_time_stamp(start_time, search_type=SearchType.Aprox)
+            if self[s].time_stamp < start_time:
+                s += 1
         if start_frame is not None:
-            s = self.get_step_index_by_frame(start_frame, search_type=Trajectories.SearchType.Right)
+            s = self.get_step_index_by_frame(start_frame, search_type=SearchType.Aprox)
+            if self[s].frame < start_frame:
+                s += 1
 
         if end_time is not None:
-            e = self.get_step_index_by_time_stamp(end_time, search_type=Trajectories.SearchType.Left)
+            e = self.get_step_index_by_time_stamp(end_time, search_type=SearchType.Aprox)
+            if self[s].time_stamp > end_time:
+                s -= 1
+
         if end_frame is not None:
-            e = self.get_step_index_by_frame(end_frame, search_type=Trajectories.SearchType.Left)
+            e = self.get_step_index_by_frame(end_frame, search_type=SearchType.Aprox)
+            if self[s].frame > end_frame:
+                s -= 1
 
         for step in self[s:e]:
             segment.append(step)
@@ -391,3 +384,36 @@ class Experiment(JsonObject):
         for episode_index in episode_list:
             self.episodes[episode_index].trajectories = Trajectories()
             self.episodes[episode_index].captures = JsonList(list_type=int)
+
+
+class SyncStep(JsonList):
+    def __init__(self):
+        JsonList.__init__(self, list_type=Step, allow_empty=True)
+
+    def __getitem__(self, index):
+        if isinstance(index, str):
+            return self.find_first(lambda s: s and s.agent_name == index, not_found_behavior=NotFoundBehavior.ReturnNone)
+        return JsonList.__getitem__(self, index)
+
+class SyncTrajectories(JsonObject):
+
+    def __init__(self, trajectories: Trajectories, agents_names: list = None):
+        self.steps = JsonList(list_type=SyncStep)
+        split_trajectories = trajectories.split_by_agent()
+        if agents_names:
+            self.agents_names = JsonList(list_type=str, iterable=agents_names)
+        else:
+            self.agents_names = JsonList(list_type=str, iterable=split_trajectories)
+        self.min_frame = trajectories[0].frame
+        self.max_frame = trajectories[-1].frame
+        split_trajectories = trajectories.split_by_agent()
+        for frame_number in range(self.min_frame, self.max_frame + 1):
+            sync_step = SyncStep()
+            for agent in split_trajectories:
+                try:
+                    agent_step = split_trajectories[agent].get_step_by_frame(frame_number)
+                    sync_step.append(agent_step)
+                except:
+                    sync_step.append(None)
+            self.steps.append(sync_step)
+        JsonObject.__init__(self)

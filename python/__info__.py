@@ -1,5 +1,5 @@
 def __module_version__():
-	return 0, 0, 359 
+	return 0, 0, 364 
 
 
 def __module_name__():
@@ -19,7 +19,7 @@ def __package_description__():
 
 
 def __install_requires__():
-	return ['numpy', 'scipy', 'matplotlib', 'json-cpp', 'tcp-messages', 'networkx', 'cv'] 
+	return ['numpy', 'scipy', 'matplotlib', 'json-cpp>=1.0.77', 'tcp-messages', 'networkx', 'cv'] 
 
 
 def __url__():
