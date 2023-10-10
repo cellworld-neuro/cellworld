@@ -25,51 +25,6 @@ class Step(JsonObject):
         self.rotation = rotation
         self.data = JsonString(data)
 
-
-class Velocities(JsonList):
-    def __init__(self, iterable=None):
-        JsonList.__init__(self, iterable=iterable, list_type=float)
-
-    def complementary_filter(self, a: float): #complementary filter
-        if a <= 0 or a >= 1:
-            raise ArithmeticError("filter parameter should be > 0 and < 1")
-        filtered = Velocities()
-        last = self[0]
-        for v in self:
-            nv = (a * last + (1 - a) * v)
-            last = nv
-            filtered.append(nv)
-        return filtered
-
-    def outliers_filter(self, threshold: float):
-        if threshold <= 0:
-            raise ArithmeticError("threshold parameter should be > 0")
-        threshold = sum(self)/len(self) * threshold
-        filtered = Velocities()
-        if len(self) == 0:
-            return filtered
-        last = self[0]
-        for v in self:
-            if abs(v-last) <= threshold:
-                filtered.append(v)
-                last = v
-            else:
-                filtered.append(last)
-        return filtered
-
-    def moving_average_filter(self, window_length: int = 2):
-        if window_length <= 0:
-            raise ArithmeticError("window length parameter should be > 0")
-        filtered = Velocities()
-        if len(self) == 0:
-            return filtered
-        le = len(self) - window_length
-        for i in range(len(self)):
-            b = i - window_length if i > window_length else 0
-            e = i + window_length if i < le else len(self)
-            filtered.append(sum(self[b:e])/(e-b))
-        return filtered
-
 class Trajectories(JsonList):
     def __init__(self, iterable=None):
         JsonList.__init__(self, iterable=iterable, list_type=Step)
@@ -417,3 +372,140 @@ class SyncTrajectories(JsonObject):
                     sync_step.append(None)
             self.steps.append(sync_step)
         JsonObject.__init__(self)
+
+
+class Data_sequence(JsonList):
+    def __init__(self, iterable=None):
+        JsonList.__init__(self, iterable=iterable, list_type=float)
+
+    def complementary_filter(self, a: float): #complementary filter
+        if a <= 0 or a >= 1:
+            raise ArithmeticError("filter parameter should be > 0 and < 1")
+        filtered = self.__class__()
+        last = self[0]
+        for v in self:
+            nv = (a * last + (1 - a) * v)
+            last = nv
+            filtered.append(nv)
+        return filtered
+
+    def outliers_filter(self, threshold: float):
+        if threshold <= 0:
+            raise ArithmeticError("threshold parameter should be > 0")
+        threshold = sum(self)/len(self) * threshold
+        filtered = self.__class__()
+        if len(self) == 0:
+            return filtered
+        last = self[0]
+        for v in self:
+            if abs(v-last) <= threshold:
+                filtered.append(v)
+                last = v
+            else:
+                filtered.append(last)
+        return filtered
+
+    def moving_average_filter(self, window_length: int = 2):
+        if window_length <= 0:
+            raise ArithmeticError("window length parameter should be > 0")
+        filtered = self.__class__()
+        if len(self) == 0:
+            return filtered
+        le = len(self) - window_length
+        for i in range(len(self)):
+            b = i - window_length if i > window_length else 0
+            e = i + window_length if i < le else len(self)
+            filtered.append(sum(self[b:e])/(e-b))
+        return filtered
+
+    def mean(self):
+        return sum(self) / len(self)
+
+    def median(self):
+        l = [x for x in self]
+        l.sort()
+        return l[len(self) // 2]
+
+    def histogram(self, bins=20):
+        min_v = min(self)
+        max_v = max(self)
+        spread = max_v - min_v
+        bin_s = spread / bins
+        r = JsonList(list_type=int, iterable=[0 for x in range(bins)])
+        for v in self:
+            i = int((v - min_v) / bin_s)
+            if i == bins:
+                i = bins - 1
+            r[i] += 1
+        return r
+
+    def std_err(self):
+        from scipy.stats import sem
+        return sem(self)
+
+    def std(self):
+        from scipy.stats import tstd
+        return tstd(self)
+
+    def best_fit(self):
+        import numpy as np
+        a, b = np.polyfit(range(len(self)), self, 1)
+        return Data_sequence([a*x+b for x in range(len(self))])
+
+
+class Distances(Data_sequence):
+    def __init__(self, trajectory: Trajectories = None, trajectory2: Trajectories = None, locations: Location_list = None, locations2: Location_list = None, incremental: bool = False):
+
+        Data_sequence.__init__(self)
+
+        if trajectory:
+            locations = trajectory.process(lambda s: s.location)
+
+        if trajectory2:
+            locations2 = trajectory2.process(lambda s: s.location)
+
+        if locations is None:
+            raise RuntimeError("No input was provided")
+
+        pl = locations[0]
+        d = 0
+        for i, l in enumerate(locations):
+            if locations2:
+                self.append(l.dist(locations2[i]))
+            else:
+                if incremental:
+                    d = d + pl.dist(l)
+                else:
+                    d = pl.dist(l)
+                self.append(d)
+                pl = l
+
+
+class Velocities(Data_sequence):
+    def __init__(self, trajectory: Trajectories = None, distances: Distances = None, locations: Location_list = None, time_stamps: Data_sequence = None, time_diff: Data_sequence = None):
+        Data_sequence.__init__(self)
+
+        if trajectory:
+            locations = trajectory.process(lambda s: s.location)
+
+        if locations:
+            distances = Distances(locations=locations)
+
+        if trajectory:
+            time_stamps = trajectory.process(lambda s: s.time_stamp)
+
+        if time_stamps:
+            def td(t):
+                r = t - td.lts
+                td.lts = t
+                return r
+            td.lts = 0
+
+            time_diff = time_stamps.process(td)
+
+        if time_diff and distances:
+            for i, td in enumerate(time_diff):
+                if td:
+                    self.append(distances[i]/td)
+                else:
+                    self.append(0.0)
