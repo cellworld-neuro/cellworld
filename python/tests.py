@@ -1,70 +1,45 @@
-from scipy.stats import entropy
+import matplotlib.pyplot as plt
+
 from src import *
+e = Experiment.load_from_file("/Users/chris/chris-lab/projects/cellworld_hackathon_01/cellworld/python/test_experiment.json")
+w = World.get_from_parameters_names(e.world_configuration_name,
+                                    "canonical",
+                                    e.occlusions)
+MDFclustering = StreamLineClusters(distance_metric=DistanceMetric.MDF)
+HAUSclustering = StreamLineClusters(distance_metric=DistanceMetric.HAUS)
+AMDclustering = StreamLineClusters(distance_metric=DistanceMetric.AMD)
 
-world = World.get_from_parameters_names("square_small", "canonical", "05_00")
-graph = Graph.create_visibility_graph(world)
+fig, ax = plt.subplots(1, 4, figsize=(12, 3))
 
-connection_count = [len(graph._connections[c.id]) for c in world.cells]
-print(connection_count)
+e.remove_episodes(e.get_incomplete_episodes() + e.get_broken_trajectory_episodes() + e.get_wrong_origin_episodes() + e.get_wrong_goal_episodes())
 
+d = Display(w, fig_size=(3, 3), fig=fig, ax=ax[0])
+for episode in e.episodes:
+    split_trajectories = episode.trajectories.split_by_agent()
+    if "prey" not in split_trajectories:
+        continue
+    prey_trajectory = split_trajectories["prey"]
+    predator_trajectory = split_trajectories["predator"]
+    MDFclustering.add_trajectory(prey_trajectory)
+    HAUSclustering.add_trajectory(prey_trajectory)
+    AMDclustering.add_trajectory(prey_trajectory)
+    d.add_trajectories(prey_trajectory,
+                       distance_equalization=True)
+clrs = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
+d = Display(w, fig_size=(3, 3), fig=fig, ax=ax[1])
+d.plot_clusters(MDFclustering, colors=clrs)
+print("MDFclustering:", len(MDFclustering.clusters))
 
-def histogram(data):
-    hist = {}
-    for d in data:
-        if d in hist:
-            hist[d] += 1
-        else:
-            hist[d] = 1
-    min_value = min(hist.keys())
-    max_value = max(hist.keys())
-    hist = [hist[i] if i in hist else 0 for i in range(min_value,max_value+1)]
-    return hist
+d = Display(w, fig_size=(3, 3), fig=fig, ax=ax[2])
+d.plot_clusters(HAUSclustering, colors=clrs)
+print("HAUSclustering:", len(HAUSclustering.clusters))
 
-
-def entropy(histogram):
-    from math import log2
-    prob = []
-    c = 0
-    for h in histogram:
-        c += h
-
-    for h in histogram:
-        if h > 0:
-            prob.append(h/c)
-    ent = 0
-    for p in prob:
-        ent += p * log2(p)
-    return -ent
-
-
-def logb(a, b):
-    from math import log
-    return log(a) / log(b)
+d = Display(w, fig_size=(3, 3), fig=fig, ax=ax[3])
+d.plot_clusters(AMDclustering, colors=clrs)
+print("AMDclustering:", len(AMDclustering.clusters))
+plt.show()
 
 
-def entropy2(probabilities, base):
-    if len(probabilities)<=1:
-        return 0
-    ent = 0
-    for p in probabilities:
-        if p>0:
-            ent -= p * logb(p, base)
-    return ent / logb(len(probabilities), base)
 
 
-def get_probabilities(data):
-    prob = []
-    c = 0
-    for h in data:
-        c += h
-
-    for h in data:
-        if h > 0:
-            prob.append(h/c)
-    return prob
-
-
-hist = histogram(connection_count)
-prob = get_probabilities(hist)
-print(prob, entropy2(prob, 2))
